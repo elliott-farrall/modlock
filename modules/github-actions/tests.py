@@ -1,24 +1,18 @@
-"""Tests for the github-actions schema and GitHub resolver."""
-
-import json
-import os
-import sys
-import textwrap
-import unittest
-from unittest.mock import MagicMock, patch
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+"""Tests for the github-actions module."""
 
 import importlib.util
+import json
+import textwrap
+import unittest
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 from modlock import Schema, load_schema
 
-_resolver_path = Path(__file__).parent.parent / "modules" / "github-actions" / "resolver.py"
-_spec = importlib.util.spec_from_file_location("resolver", _resolver_path)
+_spec = importlib.util.spec_from_file_location("resolver", Path(__file__).parent / "resolver.py")
 _mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_mod)
-GitHubResolver = _mod.Resolver
+Resolver = _mod.Resolver
 
 
 def _make_schema() -> Schema:
@@ -143,11 +137,11 @@ class TestApply(unittest.TestCase):
         self.assertIn("# v5", result)
 
 
-class TestGitHubResolver(unittest.TestCase):
-    """Tests for GitHubResolver — uses mocked HTTP calls."""
+class TestResolver(unittest.TestCase):
+    """Tests for the GitHub resolver — uses mocked HTTP calls."""
 
     def setUp(self):
-        self.resolver = GitHubResolver(token="fake-token")
+        self.resolver = Resolver(token="fake-token")
 
     def _mock_ref_response(self, sha: str, obj_type: str = "commit"):
         resp = MagicMock()

@@ -13,7 +13,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Run tests
-        run: python -m pytest tests/ -v
+        run: python -m pytest -v
 
   lock-check:
     runs-on: ubuntu-latest
