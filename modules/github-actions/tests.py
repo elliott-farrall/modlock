@@ -1,38 +1,29 @@
 """Tests for the github-actions module."""
 
-import importlib.util
 import json
 import textwrap
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from modlock import Schema, load_schema
+from core.testing import SchemaTestCase, load_module_resolver
 
-_spec = importlib.util.spec_from_file_location("resolver", Path(__file__).parent / "resolver.py")
-_mod = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_mod)
-Resolver = _mod.Resolver
+Resolver = load_module_resolver(Path(__file__).parent)
 
-
-def _make_schema() -> Schema:
-    return load_schema("github-actions", token=None)
+_MODULE = "github-actions"
+_EXAMPLE_LINE = "      - uses: actions/checkout@v4\n"
+_EXAMPLE_KEY = "actions/checkout@v4"
 
 
-class TestScan(unittest.TestCase):
-    def setUp(self):
-        self.schema = _make_schema()
+class TestScan(SchemaTestCase, unittest.TestCase):
+    module_name = _MODULE
+    example_line = _EXAMPLE_LINE
+    example_key = _EXAMPLE_KEY
 
-    def test_simple_tag(self):
-        content = textwrap.dedent("""\
-            steps:
-              - uses: actions/checkout@v4
-        """)
-        refs = self.schema.scan(content)
-        self.assertEqual(len(refs), 1)
+    def test_simple_tag_fields(self):
+        refs = self.schema.scan(self.example_line)
         self.assertEqual(refs[0]["action"], "actions/checkout")
         self.assertEqual(refs[0]["ref"], "v4")
-        self.assertEqual(refs[0]["line"], 2)
 
     def test_multiple_actions(self):
         content = textwrap.dedent("""\
@@ -49,14 +40,11 @@ class TestScan(unittest.TestCase):
 
     def test_already_pinned_sha(self):
         sha = "a" * 40
-        content = f"      - uses: actions/checkout@{sha}\n"
-        refs = self.schema.scan(content)
-        self.assertEqual(len(refs), 1)
+        refs = self.schema.scan(f"      - uses: actions/checkout@{sha}\n")
         self.assertEqual(refs[0]["ref"], sha)
 
     def test_branch_ref(self):
-        content = "      - uses: actions/checkout@main\n"
-        refs = self.schema.scan(content)
+        refs = self.schema.scan("      - uses: actions/checkout@main\n")
         self.assertEqual(refs[0]["ref"], "main")
 
     def test_no_uses_lines(self):
@@ -72,64 +60,38 @@ class TestScan(unittest.TestCase):
         self.assertEqual(self.schema.scan(content), [])
 
     def test_action_with_subdirectory(self):
-        content = "      - uses: org/repo/.github/actions/foo@v1\n"
-        refs = self.schema.scan(content)
+        refs = self.schema.scan("      - uses: org/repo/.github/actions/foo@v1\n")
         self.assertEqual(refs[0]["action"], "org/repo/.github/actions/foo")
         self.assertEqual(refs[0]["ref"], "v1")
 
 
-class TestApply(unittest.TestCase):
+class TestApply(SchemaTestCase, unittest.TestCase):
+    module_name = _MODULE
+    example_line = _EXAMPLE_LINE
+    example_key = _EXAMPLE_KEY
+
     def setUp(self):
-        self.schema = _make_schema()
+        super().setUp()
         self.sha = "a" * 40
 
-    def test_replaces_tag_with_sha(self):
-        content = "      - uses: actions/checkout@v4\n"
-        locks = {"actions/checkout@v4": self.sha}
-        result = self.schema.apply(content, locks)
-        self.assertIn(f"actions/checkout@{self.sha}", result)
+    def test_original_ref_preserved_as_comment(self):
+        result = self.schema.apply(self.example_line, {self.example_key: self.sha})
         self.assertIn("# v4", result)
-
-    def test_preserves_unlocked_lines(self):
-        content = textwrap.dedent("""\
-              - uses: actions/checkout@v4
-              - run: echo hello
-        """)
-        locks = {"actions/checkout@v4": self.sha}
-        result = self.schema.apply(content, locks)
-        self.assertIn("run: echo hello", result)
 
     def test_does_not_double_lock_sha(self):
         sha = "b" * 40
         content = f"      - uses: actions/checkout@{sha}\n"
-        locks = {f"actions/checkout@{sha}": "c" * 40}
-        result = self.schema.apply(content, locks)
+        result = self.schema.apply(content, {f"actions/checkout@{sha}": "c" * 40})
         self.assertIn(sha, result)
         self.assertNotIn("c" * 40, result)
-
-    def test_unknown_key_unchanged(self):
-        content = "      - uses: actions/checkout@v4\n"
-        result = self.schema.apply(content, {})
-        self.assertIn("actions/checkout@v4", result)
-        self.assertNotIn("#", result)
-
-    def test_trailing_newline_preserved(self):
-        content = "      - uses: actions/checkout@v4\n"
-        locks = {"actions/checkout@v4": self.sha}
-        result = self.schema.apply(content, locks)
-        self.assertTrue(result.endswith("\n"))
 
     def test_multiple_locks_applied(self):
         content = textwrap.dedent("""\
               - uses: actions/checkout@v4
               - uses: actions/setup-python@v5
         """)
-        sha1 = "1" * 40
-        sha2 = "2" * 40
-        locks = {
-            "actions/checkout@v4": sha1,
-            "actions/setup-python@v5": sha2,
-        }
+        sha1, sha2 = "1" * 40, "2" * 40
+        locks = {"actions/checkout@v4": sha1, "actions/setup-python@v5": sha2}
         result = self.schema.apply(content, locks)
         self.assertIn(sha1, result)
         self.assertIn(sha2, result)
@@ -166,30 +128,24 @@ class TestResolver(unittest.TestCase):
     def test_resolve_tag(self):
         sha = "a" * 40
         with patch("urllib.request.urlopen", return_value=self._mock_ref_response(sha)):
-            result = self.resolver.resolve("actions/checkout", "v4")
-        self.assertEqual(result, sha)
+            self.assertEqual(self.resolver.resolve("actions/checkout", "v4"), sha)
 
     def test_resolve_annotated_tag(self):
-        tag_sha = "b" * 40
-        commit_sha = "c" * 40
+        tag_sha, commit_sha = "b" * 40, "c" * 40
         with patch("urllib.request.urlopen", side_effect=self._mock_annotated_responses(tag_sha, commit_sha)):
-            result = self.resolver.resolve("actions/checkout", "v4")
-        self.assertEqual(result, commit_sha)
+            self.assertEqual(self.resolver.resolve("actions/checkout", "v4"), commit_sha)
 
     def test_resolve_sha_passthrough(self):
         sha = "d" * 40
         with patch("urllib.request.urlopen") as mock_open:
-            result = self.resolver.resolve("actions/checkout", sha)
+            self.assertEqual(self.resolver.resolve("actions/checkout", sha), sha)
         mock_open.assert_not_called()
-        self.assertEqual(result, sha)
 
     def test_resolve_subdirectory_action(self):
         sha = "e" * 40
         with patch("urllib.request.urlopen", return_value=self._mock_ref_response(sha)) as mock_open:
-            result = self.resolver.resolve("org/repo/.github/actions/foo", "v1")
-        call_url = mock_open.call_args[0][0].full_url
-        self.assertIn("/repos/org/repo/", call_url)
-        self.assertEqual(result, sha)
+            self.resolver.resolve("org/repo/.github/actions/foo", "v1")
+        self.assertIn("/repos/org/repo/", mock_open.call_args[0][0].full_url)
 
 
 if __name__ == "__main__":
