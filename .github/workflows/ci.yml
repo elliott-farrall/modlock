@@ -27,20 +27,20 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           python modlock.py lock \
-            --lockfile examples/modlock.lock \
-            examples/workflow-simple.yml \
-            examples/workflow-complex.yml
+            --lockfile modules/github-actions/examples/modlock.lock \
+            modules/github-actions/examples/workflow-simple.yml \
+            modules/github-actions/examples/workflow-complex.yml
       - name: Show lock file
-        run: cat examples/modlock.lock
+        run: cat modules/github-actions/examples/modlock.lock
       - name: Apply locks to examples
         run: |
           python modlock.py apply \
-            --lockfile examples/modlock.lock \
-            examples/workflow-simple.yml \
-            examples/workflow-complex.yml
+            --lockfile modules/github-actions/examples/modlock.lock \
+            modules/github-actions/examples/workflow-simple.yml \
+            modules/github-actions/examples/workflow-complex.yml
       - name: Show locked output
         run: |
           echo "--- workflow-simple.yml ---"
-          cat examples/workflow-simple.yml
+          cat modules/github-actions/examples/workflow-simple.yml
           echo "--- workflow-complex.yml ---"
-          cat examples/workflow-complex.yml
+          cat modules/github-actions/examples/workflow-complex.yml
