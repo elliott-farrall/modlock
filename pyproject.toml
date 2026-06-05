@@ -1,3 +1,18 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "modlock"
+version = "0.1.0"
+requires-python = ">=3.11"
+
+[tool.setuptools.packages.find]
+include = ["core*"]
+
+[project.scripts]
+modlock = "core:main"
+
 [tool.pytest.ini_options]
 testpaths = ["modules"]
 python_files = ["tests.py"]

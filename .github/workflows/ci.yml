@@ -12,8 +12,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Install
+        run: pip install -e .
       - name: Run tests
-        run: python -m pytest -v
+        run: pytest -v
 
   lock-check:
     runs-on: ubuntu-latest
@@ -22,11 +24,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Install
+        run: pip install -e .
       - name: Lock example workflows
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          python modlock.py lock \
+          modlock lock \
             --lockfile modules/github-actions/examples/modlock.lock \
             modules/github-actions/examples/workflow-simple.yml \
             modules/github-actions/examples/workflow-complex.yml
@@ -34,7 +38,7 @@ jobs:
         run: cat modules/github-actions/examples/modlock.lock
       - name: Apply locks to examples
         run: |
-          python modlock.py apply \
+          modlock apply \
             --lockfile modules/github-actions/examples/modlock.lock \
             modules/github-actions/examples/workflow-simple.yml \
             modules/github-actions/examples/workflow-complex.yml
