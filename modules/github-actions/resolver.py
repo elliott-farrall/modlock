@@ -1,9 +1,8 @@
 """
-GitHub resolver for modlock.
+Resolver for the github-actions module.
 
-Resolves `owner/repo@ref` references to immutable commit SHAs via the
-GitHub REST API. Handles lightweight tags, annotated tags (two-step
-dereference), and branches.
+Resolves owner/repo@ref to an immutable commit SHA via the GitHub REST API.
+Handles lightweight tags, annotated tags (two-step dereference), and branches.
 """
 
 import json
@@ -25,9 +24,7 @@ def _gh_api(path: str, token: str | None) -> dict:
         return json.loads(resp.read())
 
 
-class GitHubResolver:
-    name = "github"
-
+class Resolver:
     def __init__(self, config: dict | None = None, token: str | None = None):
         self.token = token or os.environ.get("GITHUB_TOKEN")
 

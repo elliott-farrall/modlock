@@ -16,6 +16,5 @@ sha_pattern = '^[0-9a-f]{40}$'
 template = "{prefix}{action}@{sha} # {ref}"
 
 [resolver]
-type = "github"
 action_field = "action"
 ref_field = "ref"

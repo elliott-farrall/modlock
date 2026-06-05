@@ -9,8 +9,16 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+import importlib.util
+from pathlib import Path
+
 from modlock import Schema, load_schema
-from resolvers.github import GitHubResolver
+
+_resolver_path = Path(__file__).parent.parent / "modules" / "github-actions" / "resolver.py"
+_spec = importlib.util.spec_from_file_location("resolver", _resolver_path)
+_mod = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_mod)
+GitHubResolver = _mod.Resolver
 
 
 def _make_schema() -> Schema:

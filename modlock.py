@@ -20,6 +20,7 @@ Options:
 
 import argparse
 import glob as _glob
+import importlib.util
 import json
 import os
 import re
@@ -28,7 +29,7 @@ import tomllib
 from pathlib import Path
 
 LOCKFILE_DEFAULT = "modlock.lock"
-SCHEMAS_DIR = Path(__file__).parent / "schemas"
+MODULES_DIR = Path(__file__).parent / "modules"
 
 
 # ---------------------------------------------------------------------------
@@ -36,7 +37,7 @@ SCHEMAS_DIR = Path(__file__).parent / "schemas"
 # ---------------------------------------------------------------------------
 
 class Schema:
-    def __init__(self, config: dict, token: str | None = None):
+    def __init__(self, config: dict, module_dir: Path, token: str | None = None):
         self.name = config["name"]
         self.file_patterns = config.get("file_patterns", [])
 
@@ -50,11 +51,7 @@ class Schema:
 
         self._template = config["output"]["template"]
 
-        from resolvers import RESOLVERS
-        resolver_type = resolver_cfg["type"]
-        if resolver_type not in RESOLVERS:
-            raise ValueError(f"Unknown resolver type '{resolver_type}'. Available: {', '.join(RESOLVERS)}")
-        self._resolver = RESOLVERS[resolver_type](config=resolver_cfg, token=token)
+        self._resolver = _load_resolver(module_dir, config=resolver_cfg, token=token)
 
     def lock_key(self, groups: dict) -> str:
         return f"{groups[self.action_field]}@{groups[self.ref_field]}"
@@ -99,19 +96,28 @@ class Schema:
 
 
 # ---------------------------------------------------------------------------
-# Schema loading
+# Module loading
 # ---------------------------------------------------------------------------
 
+def _load_resolver(module_dir: Path, config: dict, token: str | None):
+    resolver_path = module_dir / "resolver.py"
+    spec = importlib.util.spec_from_file_location("resolver", resolver_path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.Resolver(config=config, token=token)
+
+
 def load_schema(name: str, token: str | None = None) -> Schema:
-    toml_path = SCHEMAS_DIR / f"{name}.toml"
+    module_dir = MODULES_DIR / name
+    toml_path = module_dir / "schema.toml"
     if not toml_path.exists():
-        available = [p.stem for p in SCHEMAS_DIR.glob("*.toml")]
+        available = [p.name for p in MODULES_DIR.iterdir() if p.is_dir()]
         raise FileNotFoundError(
-            f"No schema '{name}' found. Available: {', '.join(sorted(available)) or 'none'}"
+            f"No module '{name}' found. Available: {', '.join(sorted(available)) or 'none'}"
         )
     with open(toml_path, "rb") as f:
         config = tomllib.load(f)
-    return Schema(config, token=token)
+    return Schema(config, module_dir=module_dir, token=token)
 
 
 # ---------------------------------------------------------------------------
