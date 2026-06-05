@@ -1,19 +1,25 @@
-"""Tests for the GitHub Actions schema."""
+"""Tests for the github-actions schema and GitHub resolver."""
 
-import sys
+import json
 import os
+import sys
 import textwrap
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from schemas.github_actions import GitHubActionsSchema
+from modlock import Schema, load_schema
+from resolvers.github import GitHubResolver
+
+
+def _make_schema() -> Schema:
+    return load_schema("github-actions", token=None)
 
 
 class TestScan(unittest.TestCase):
     def setUp(self):
-        self.schema = GitHubActionsSchema(token=None)
+        self.schema = _make_schema()
 
     def test_simple_tag(self):
         content = textwrap.dedent("""\
@@ -61,8 +67,7 @@ class TestScan(unittest.TestCase):
                 steps:
                   - run: echo hello
         """)
-        refs = self.schema.scan(content)
-        self.assertEqual(refs, [])
+        self.assertEqual(self.schema.scan(content), [])
 
     def test_action_with_subdirectory(self):
         content = "      - uses: org/repo/.github/actions/foo@v1\n"
@@ -73,7 +78,7 @@ class TestScan(unittest.TestCase):
 
 class TestApply(unittest.TestCase):
     def setUp(self):
-        self.schema = GitHubActionsSchema(token=None)
+        self.schema = _make_schema()
         self.sha = "a" * 40
 
     def test_replaces_tag_with_sha(self):
@@ -93,12 +98,10 @@ class TestApply(unittest.TestCase):
         self.assertIn("run: echo hello", result)
 
     def test_does_not_double_lock_sha(self):
-        # An already-SHA ref should not be commented out again
         sha = "b" * 40
         content = f"      - uses: actions/checkout@{sha}\n"
         locks = {f"actions/checkout@{sha}": "c" * 40}
         result = self.schema.apply(content, locks)
-        # No replacement because the ref IS a SHA
         self.assertIn(sha, result)
         self.assertNotIn("c" * 40, result)
 
@@ -132,35 +135,27 @@ class TestApply(unittest.TestCase):
         self.assertIn("# v5", result)
 
 
-class TestResolve(unittest.TestCase):
-    """Tests for resolve() — uses mocked HTTP calls."""
+class TestGitHubResolver(unittest.TestCase):
+    """Tests for GitHubResolver — uses mocked HTTP calls."""
 
     def setUp(self):
-        self.schema = GitHubActionsSchema(token="fake-token")
+        self.resolver = GitHubResolver(token="fake-token")
 
-    def _mock_tag_response(self, sha: str, tag_type: str = "commit"):
-        """Return a mock for the /git/ref/tags response."""
+    def _mock_ref_response(self, sha: str, obj_type: str = "commit"):
         resp = MagicMock()
-        resp.read.return_value = json_bytes({
-            "object": {"type": tag_type, "sha": sha}
-        })
+        resp.read.return_value = json.dumps({"object": {"type": obj_type, "sha": sha}}).encode()
         resp.__enter__ = lambda s: s
         resp.__exit__ = MagicMock(return_value=False)
         return resp
 
-    def _mock_annotated_tag_response(self, tag_sha: str, commit_sha: str):
-        """Two-step: first the ref (annotated), then the tag object."""
+    def _mock_annotated_responses(self, tag_sha: str, commit_sha: str):
         ref_resp = MagicMock()
-        ref_resp.read.return_value = json_bytes({
-            "object": {"type": "tag", "sha": tag_sha}
-        })
+        ref_resp.read.return_value = json.dumps({"object": {"type": "tag", "sha": tag_sha}}).encode()
         ref_resp.__enter__ = lambda s: s
         ref_resp.__exit__ = MagicMock(return_value=False)
 
         tag_resp = MagicMock()
-        tag_resp.read.return_value = json_bytes({
-            "object": {"type": "commit", "sha": commit_sha}
-        })
+        tag_resp.read.return_value = json.dumps({"object": {"type": "commit", "sha": commit_sha}}).encode()
         tag_resp.__enter__ = lambda s: s
         tag_resp.__exit__ = MagicMock(return_value=False)
 
@@ -168,38 +163,31 @@ class TestResolve(unittest.TestCase):
 
     def test_resolve_tag(self):
         sha = "a" * 40
-        with patch("urllib.request.urlopen", return_value=self._mock_tag_response(sha)):
-            result = self.schema.resolve("actions/checkout", "v4")
+        with patch("urllib.request.urlopen", return_value=self._mock_ref_response(sha)):
+            result = self.resolver.resolve("actions/checkout", "v4")
         self.assertEqual(result, sha)
 
     def test_resolve_annotated_tag(self):
         tag_sha = "b" * 40
         commit_sha = "c" * 40
-        responses = self._mock_annotated_tag_response(tag_sha, commit_sha)
-        with patch("urllib.request.urlopen", side_effect=responses):
-            result = self.schema.resolve("actions/checkout", "v4")
+        with patch("urllib.request.urlopen", side_effect=self._mock_annotated_responses(tag_sha, commit_sha)):
+            result = self.resolver.resolve("actions/checkout", "v4")
         self.assertEqual(result, commit_sha)
 
     def test_resolve_sha_passthrough(self):
         sha = "d" * 40
         with patch("urllib.request.urlopen") as mock_open:
-            result = self.schema.resolve("actions/checkout", sha)
+            result = self.resolver.resolve("actions/checkout", sha)
         mock_open.assert_not_called()
         self.assertEqual(result, sha)
 
     def test_resolve_subdirectory_action(self):
         sha = "e" * 40
-        # org/repo/.github/actions/foo should resolve against org/repo
-        with patch("urllib.request.urlopen", return_value=self._mock_tag_response(sha)) as mock_open:
-            result = self.schema.resolve("org/repo/.github/actions/foo", "v1")
+        with patch("urllib.request.urlopen", return_value=self._mock_ref_response(sha)) as mock_open:
+            result = self.resolver.resolve("org/repo/.github/actions/foo", "v1")
         call_url = mock_open.call_args[0][0].full_url
         self.assertIn("/repos/org/repo/", call_url)
         self.assertEqual(result, sha)
-
-
-def json_bytes(obj) -> bytes:
-    import json
-    return json.dumps(obj).encode()
 
 
 if __name__ == "__main__":

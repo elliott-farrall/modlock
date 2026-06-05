@@ -1,0 +1,21 @@
+name = "github-actions"
+file_patterns = [
+  "**/.github/workflows/*.yml",
+  "**/.github/workflows/*.yaml",
+]
+
+[scanner]
+# Matches:  - uses: owner/repo@ref
+# Named groups: prefix, action, ref, suffix
+pattern = '^(?P<prefix>[ \t]*-?[ \t]*uses:[ \t]*)(?P<action>[a-zA-Z0-9_./.-]+/[a-zA-Z0-9_./.-]+)@(?P<ref>[a-zA-Z0-9_./:-]+)(?P<suffix>.*)$'
+sha_pattern = '^[0-9a-f]{40}$'
+
+[output]
+# {prefix}, {action}, {ref}, {suffix} come from the scanner named groups.
+# {sha} is the resolved commit hash.
+template = "{prefix}{action}@{sha} # {ref}"
+
+[resolver]
+type = "github"
+action_field = "action"
+ref_field = "ref"
