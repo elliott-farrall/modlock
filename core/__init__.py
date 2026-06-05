@@ -49,13 +49,21 @@ class Schema:
         self.ref_field = resolver_cfg.get("ref_field", "ref")
 
         self._template = config["output"]["template"]
-        self._resolver = _load_resolver(module_dir, config=resolver_cfg, token=token)
+
+        mod = _load_module(module_dir)
+        self._resolver = mod.Resolver(config=resolver_cfg, token=token)
+        # Modules may override the default regex-based scanner/applier for
+        # formats that require multi-line context (e.g. Azure Pipelines).
+        self._custom_scanner = getattr(mod, "scan", None)
+        self._custom_applier = getattr(mod, "apply", None)
 
     def lock_key(self, groups: dict) -> str:
         return f"{groups[self.action_field]}@{groups[self.ref_field]}"
 
     def scan(self, content: str) -> list[dict]:
         """Return one dict per matched reference, including all named groups and line number."""
+        if self._custom_scanner:
+            return self._custom_scanner(content)
         refs = []
         for i, line in enumerate(content.splitlines(), 1):
             m = self._pattern.match(line)
@@ -73,6 +81,8 @@ class Schema:
         The original ref is preserved as a trailing comment via the output template.
         Lines whose ref is already a SHA, or whose key is not in locks, are unchanged.
         """
+        if self._custom_applier:
+            return self._custom_applier(content, locks)
         out_lines = []
         for line in content.splitlines():
             m = self._pattern.match(line)
@@ -96,12 +106,13 @@ class Schema:
 # Module loading
 # ---------------------------------------------------------------------------
 
-def _load_resolver(module_dir: Path, config: dict, token: str | None):
+def _load_module(module_dir: Path):
+    """Load a module's resolver.py and return the module object."""
     resolver_path = module_dir / "resolver.py"
     spec = importlib.util.spec_from_file_location("resolver", resolver_path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    return mod.Resolver(config=config, token=token)
+    return mod
 
 
 def load_schema(name: str, token: str | None = None) -> Schema:
@@ -115,6 +126,7 @@ def load_schema(name: str, token: str | None = None) -> Schema:
     with open(toml_path, "rb") as f:
         config = tomllib.load(f)
     return Schema(config, module_dir=module_dir, token=token)
+
 
 
 # ---------------------------------------------------------------------------

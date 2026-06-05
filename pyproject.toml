@@ -17,3 +17,4 @@ modlock = "core:main"
 testpaths = ["modules"]
 python_files = ["tests.py"]
 pythonpath = ["."]
+addopts = ["--import-mode=importlib"]

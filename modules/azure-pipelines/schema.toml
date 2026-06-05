@@ -1,0 +1,21 @@
+name = "azure-pipelines"
+file_patterns = [
+  "**/azure-pipelines.yml",
+  "**/azure-pipelines/*.yml",
+  "**/.azure/**/*.yml",
+]
+
+[scanner]
+# Repository resource refs span two lines (name: then ref:), so scanning
+# and applying are handled by module-level functions in resolver.py rather
+# than these patterns. The patterns below are kept as documentation only.
+pattern = '^\s+ref:\s+\S+'
+sha_pattern = '^[0-9a-f]{40}$'
+
+[output]
+# Unused — apply() is also implemented in resolver.py for the same reason.
+template = "{prefix}{sha} # {ref}"
+
+[resolver]
+action_field = "action"
+ref_field = "ref"
