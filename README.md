@@ -26,38 +26,43 @@ pip install modlock
 
 ## Usage
 
-### lock
+### Project config (recommended)
 
-Resolve all version references in one or more files and write a lock file.
+Create a `modlock.toml` at the root of your repository listing which
+modules and files to manage:
 
-```sh
-modlock lock --schema github-actions .github/workflows/*.yml
+```toml
+[modules.github-actions]
+files = [".github/workflows/*.yml"]
+
+[modules.azure-pipelines]
+files = ["azure-pipelines.yml"]
 ```
 
-On the first run this creates `modlock.lock`. References that are already
-in the lock file are left untouched; only new ones are resolved.
-
-### apply
-
-Rewrite files in-place using the locked SHAs.
+Then just run commands with no arguments — modlock reads the config and
+processes all modules automatically:
 
 ```sh
+modlock lock    # resolve refs and write modlock.lock
+modlock apply   # rewrite files with locked SHAs
+modlock update  # re-resolve everything and re-apply
+```
+
+### Explicit mode
+
+Process a single module and specific files without a config file:
+
+```sh
+modlock lock  --schema github-actions .github/workflows/*.yml
 modlock apply --schema github-actions .github/workflows/*.yml
-```
-
-### update
-
-Re-resolve every reference (ignoring existing locks) then apply.
-
-```sh
-modlock update --schema github-actions .github/workflows/*.yml
 ```
 
 ### Options
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--schema` | `github-actions` | Module to use for scanning and resolving |
+| `--config` | `modlock.toml` | Project config file (config mode) |
+| `--schema` | — | Module to use (required in explicit mode) |
 | `--lockfile` | `modlock.lock` | Path to the lock file |
 | `--token` | `$GITHUB_TOKEN` | API token for the resolver |
 

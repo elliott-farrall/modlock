@@ -26,25 +26,17 @@ jobs:
           python-version: "3.12"
       - name: Install
         run: pip install -e ".[test]"
-      - name: Lock example workflows
+      - name: Lock example files
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          modlock lock \
-            --lockfile modules/github-actions/examples/modlock.lock \
-            modules/github-actions/examples/workflow-simple.yml \
-            modules/github-actions/examples/workflow-complex.yml
+        run: modlock lock
       - name: Show lock file
-        run: cat modules/github-actions/examples/modlock.lock
-      - name: Apply locks to examples
-        run: |
-          modlock apply \
-            --lockfile modules/github-actions/examples/modlock.lock \
-            modules/github-actions/examples/workflow-simple.yml \
-            modules/github-actions/examples/workflow-complex.yml
+        run: cat modlock.lock
+      - name: Apply locks
+        run: modlock apply
       - name: Show locked output
         run: |
-          echo "--- workflow-simple.yml ---"
-          cat modules/github-actions/examples/workflow-simple.yml
-          echo "--- workflow-complex.yml ---"
-          cat modules/github-actions/examples/workflow-complex.yml
+          for f in modules/*/examples/*.yml; do
+            echo "--- $f ---"
+            cat "$f"
+          done

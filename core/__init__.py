@@ -1,20 +1,21 @@
 """
 modlock — modular version locking for plain-text config files.
 
-Usage:
-  modlock lock   [--schema SCHEMA] [--token TOKEN] FILE [FILE ...]
-  modlock apply  [--schema SCHEMA] [--lockfile PATH] FILE [FILE ...]
-  modlock update [--schema SCHEMA] [--token TOKEN] [--lockfile PATH] FILE [FILE ...]
+Config-file mode (reads modlock.toml, no file arguments needed):
+  modlock lock
+  modlock apply
+  modlock update
 
-Commands:
-  lock    Resolve all refs in FILE(s) to commit SHAs and write/update the lock file.
-  apply   Rewrite FILE(s) in-place, replacing refs with the locked SHAs.
-  update  Re-resolve all refs (ignoring existing locks) and re-apply.
+Explicit mode (single module, files supplied on the command line):
+  modlock lock   --schema SCHEMA FILE [FILE ...]
+  modlock apply  --schema SCHEMA FILE [FILE ...]
+  modlock update --schema SCHEMA FILE [FILE ...]
 
 Options:
-  --schema   Schema name to use (default: github-actions).
-  --token    API token for the schema's resolver (falls back to env var).
+  --schema   Module name (explicit mode only).
+  --token    API token for the resolver (falls back to env var).
   --lockfile Path to the lock file (default: modlock.lock).
+  --config   Path to the project config (default: modlock.toml).
 """
 
 import argparse
@@ -28,6 +29,7 @@ import tomllib
 from pathlib import Path
 
 LOCKFILE_DEFAULT = "modlock.lock"
+CONFIG_DEFAULT = "modlock.toml"
 MODULES_DIR = Path(__file__).parent.parent / "modules"
 
 
@@ -128,16 +130,42 @@ def load_schema(name: str, token: str | None = None) -> Schema:
     return Schema(config, module_dir=module_dir, token=token)
 
 
+# ---------------------------------------------------------------------------
+# Project config
+# ---------------------------------------------------------------------------
+
+def load_config(path: str) -> dict[str, dict]:
+    """
+    Load a modlock.toml project config file.
+    Returns {module_name: {"files": [...], ...}}.
+    """
+    if not os.path.exists(path):
+        raise FileNotFoundError(
+            f"Config file '{path}' not found.\n"
+            f"Create one or supply --schema and FILE arguments to use explicit mode."
+        )
+    with open(path, "rb") as f:
+        config = tomllib.load(f)
+    return config.get("modules", {})
+
 
 # ---------------------------------------------------------------------------
-# Lock file helpers
+# Lock file
 # ---------------------------------------------------------------------------
 
 def load_lockfile(path: str) -> dict:
     if os.path.exists(path):
         with open(path) as f:
-            return json.load(f)
-    return {"version": 1, "locks": {}}
+            data = json.load(f)
+        if data.get("version", 1) < 2:
+            print(
+                f"Warning: {path} is v1 format and cannot be reused. "
+                f"Re-run 'modlock lock' to regenerate.",
+                file=sys.stderr,
+            )
+            return {"version": 2, "modules": {}}
+        return data
+    return {"version": 2, "modules": {}}
 
 
 def save_lockfile(path: str, data: dict) -> None:
@@ -164,12 +192,12 @@ def expand_files(patterns: list[str]) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Commands
+# Commands — operate on a shared lockdata dict, caller saves
 # ---------------------------------------------------------------------------
 
-def cmd_lock(schema: Schema, files: list[str], lockfile_path: str, force: bool = False) -> None:
-    data = load_lockfile(lockfile_path)
-    locks = data.get("locks", {})
+def cmd_lock(schema: Schema, files: list[str], lockdata: dict, force: bool = False) -> bool:
+    """Resolve refs and update lockdata in-place. Returns True if anything changed."""
+    module_locks = lockdata["modules"].setdefault(schema.name, {})
     changed = False
 
     for filepath in files:
@@ -178,47 +206,36 @@ def cmd_lock(schema: Schema, files: list[str], lockfile_path: str, force: bool =
             action = ref_info[schema.action_field]
             ref = ref_info[schema.ref_field]
             key = schema.lock_key(ref_info)
-            if key in locks and not force:
-                print(f"  already locked: {key} → {locks[key][:12]}…")
+            if key in module_locks and not force:
+                print(f"  already locked: {key} → {module_locks[key][:12]}…")
                 continue
             print(f"  resolving: {key}", end="", flush=True)
             try:
                 sha = schema.resolve(action, ref)
-                locks[key] = sha
+                module_locks[key] = sha
                 changed = True
                 print(f" → {sha[:12]}…")
             except Exception as e:
                 print(f" FAILED: {e}", file=sys.stderr)
 
-    if changed:
-        data["locks"] = locks
-        save_lockfile(lockfile_path, data)
-        print(f"Lock file written: {lockfile_path}")
-    else:
-        print("Nothing to update.")
+    return changed
 
 
-def cmd_apply(schema: Schema, files: list[str], lockfile_path: str) -> None:
-    data = load_lockfile(lockfile_path)
-    locks = data.get("locks", {})
-
-    if not locks:
-        print("Lock file is empty — run 'modlock lock' first.", file=sys.stderr)
-        sys.exit(1)
+def cmd_apply(schema: Schema, files: list[str], lockdata: dict) -> None:
+    """Rewrite files in-place using the locks stored in lockdata for this module."""
+    module_locks = lockdata["modules"].get(schema.name, {})
+    if not module_locks:
+        print(f"  no locks for '{schema.name}' — run 'modlock lock' first.", file=sys.stderr)
+        return
 
     for filepath in files:
         original = Path(filepath).read_text()
-        locked = schema.apply(original, locks)
+        locked = schema.apply(original, module_locks)
         if locked != original:
             Path(filepath).write_text(locked)
-            print(f"  applied locks: {filepath}")
+            print(f"  applied: {filepath}")
         else:
-            print(f"  no changes:    {filepath}")
-
-
-def cmd_update(schema: Schema, files: list[str], lockfile_path: str) -> None:
-    cmd_lock(schema, files, lockfile_path, force=True)
-    cmd_apply(schema, files, lockfile_path)
+            print(f"  no changes: {filepath}")
 
 
 # ---------------------------------------------------------------------------
@@ -231,32 +248,64 @@ def main() -> None:
         description="Modular version locking for plain-text config files.",
     )
     parser.add_argument("command", choices=["lock", "apply", "update"])
-    parser.add_argument("files", nargs="+", metavar="FILE")
-    parser.add_argument("--schema", default="github-actions")
-    parser.add_argument("--token")
+    parser.add_argument(
+        "files", nargs="*", metavar="FILE",
+        help="Files to process (explicit mode). Omit to use modlock.toml.",
+    )
+    parser.add_argument("--schema", help="Module to use (required in explicit mode).")
+    parser.add_argument("--token", help="API token for the resolver.")
     parser.add_argument("--lockfile", default=LOCKFILE_DEFAULT)
+    parser.add_argument("--config", default=CONFIG_DEFAULT,
+                        help=f"Project config file (default: {CONFIG_DEFAULT}).")
 
     args = parser.parse_args()
 
-    try:
-        schema = load_schema(args.schema, token=args.token)
-    except FileNotFoundError as e:
-        print(str(e), file=sys.stderr)
-        sys.exit(1)
+    # Build list of (schema, files) jobs
+    if args.files:
+        # Explicit mode — --schema required
+        if not args.schema:
+            parser.error("--schema is required when specifying files explicitly.")
+        try:
+            schema = load_schema(args.schema, token=args.token)
+        except FileNotFoundError as e:
+            print(str(e), file=sys.stderr)
+            sys.exit(1)
+        files = expand_files(args.files)
+        if not files:
+            print("No files matched.", file=sys.stderr)
+            sys.exit(1)
+        jobs = [(schema, files)]
+    else:
+        # Config mode — reads modlock.toml
+        try:
+            config = load_config(args.config)
+        except FileNotFoundError as e:
+            print(str(e), file=sys.stderr)
+            sys.exit(1)
+        jobs = []
+        for module_name, module_cfg in config.items():
+            try:
+                schema = load_schema(module_name, token=args.token)
+            except FileNotFoundError as e:
+                print(str(e), file=sys.stderr)
+                sys.exit(1)
+            files = expand_files(module_cfg.get("files", []))
+            if files:
+                jobs.append((schema, files))
 
-    files = expand_files(args.files)
-    if not files:
-        print("No files to process.", file=sys.stderr)
-        sys.exit(1)
+    lockdata = load_lockfile(args.lockfile)
+    changed = False
 
-    print(f"Schema: {args.schema}")
-    print(f"Files:  {', '.join(files)}")
-    print(f"Lock:   {args.lockfile}")
-    print()
+    for schema, files in jobs:
+        print(f"\n[{schema.name}]")
+        if args.command in ("lock", "update"):
+            changed |= cmd_lock(schema, files, lockdata, force=args.command == "update")
+        if args.command in ("apply", "update"):
+            cmd_apply(schema, files, lockdata)
 
-    if args.command == "lock":
-        cmd_lock(schema, files, args.lockfile)
-    elif args.command == "apply":
-        cmd_apply(schema, files, args.lockfile)
-    elif args.command == "update":
-        cmd_update(schema, files, args.lockfile)
+    if args.command in ("lock", "update"):
+        if changed:
+            save_lockfile(args.lockfile, lockdata)
+            print(f"\nLock file written: {args.lockfile}")
+        else:
+            print("\nNothing to update.")
