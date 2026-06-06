@@ -2,8 +2,3 @@
 files = [
   "modules/github-actions/examples/*.yml",
 ]
-
-[modules.azure-pipelines]
-files = [
-  "modules/azure-pipelines/examples/*.yml",
-]
