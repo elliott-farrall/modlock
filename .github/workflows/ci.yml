@@ -30,13 +30,12 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: modlock lock
-      - name: Show lock file
-        run: cat modlock.lock
       - name: Apply locks
         run: modlock apply
-      - name: Show locked output
-        run: |
-          for f in modules/*/examples/*.yml; do
-            echo "--- $f ---"
-            cat "$f"
-          done
+      - name: Upload lock artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: lock-output
+          path: |
+            modlock.lock
+            modules/*/examples/
