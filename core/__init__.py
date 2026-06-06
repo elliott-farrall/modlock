@@ -2,20 +2,20 @@
 modlock — modular version locking for plain-text config files.
 
 Config-file mode (reads modlock.toml/yaml/json, no file arguments needed):
-  modlock lock    Resolve refs, write lock file, and apply to files.
-  modlock apply   Apply an existing lock file without re-resolving.
-  modlock update  Re-resolve all refs, update lock file, and apply.
+  modlock lock              Resolve refs, write lock file, and apply to files.
+  modlock lock --apply-only Apply an existing lock file without re-resolving.
+  modlock update            Re-resolve all refs, update lock file, and apply.
 
 Explicit mode (single module, files supplied on the command line):
-  modlock lock   --schema SCHEMA FILE [FILE ...]
-  modlock apply  --schema SCHEMA FILE [FILE ...]
-  modlock update --schema SCHEMA FILE [FILE ...]
+  modlock lock   [--apply-only] --schema SCHEMA FILE [FILE ...]
+  modlock update               --schema SCHEMA FILE [FILE ...]
 
 Options:
-  --schema   Module name (explicit mode only).
-  --token    API token for the resolver (falls back to env var).
-  --lockfile Path to the lock file (default: modlock.lock).
-  --config   Path to the project config (auto-discovered if omitted).
+  --apply-only  Apply the existing lock file without resolving any refs.
+  --schema      Module name (explicit mode only).
+  --token       API token for the resolver (falls back to env var).
+  --lockfile    Path to the lock file (default: modlock.lock).
+  --config      Path to the project config (auto-discovered if omitted).
 """
 
 import argparse
@@ -280,10 +280,14 @@ def main() -> None:
         prog="modlock",
         description="Modular version locking for plain-text config files.",
     )
-    parser.add_argument("command", choices=["lock", "apply", "update"])
+    parser.add_argument("command", choices=["lock", "update"])
     parser.add_argument(
         "files", nargs="*", metavar="FILE",
         help="Files to process (explicit mode). Omit to use modlock.toml.",
+    )
+    parser.add_argument(
+        "--apply-only", action="store_true",
+        help="Apply the existing lock file without resolving any refs. Only valid with 'lock'.",
     )
     parser.add_argument("--schema", help="Module to use (required in explicit mode).")
     parser.add_argument("--token", help="API token for the resolver.")
@@ -294,6 +298,9 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+
+    if args.apply_only and args.command != "lock":
+        parser.error("--apply-only is only valid with the 'lock' command.")
 
     # Build list of (schema, files) jobs
     if args.files:
@@ -342,12 +349,11 @@ def main() -> None:
 
     for schema, files in jobs:
         print(f"\n[{schema.name}]")
-        if args.command in ("lock", "update"):
+        if not args.apply_only:
             changed |= cmd_lock(schema, files, lockdata, force=args.command == "update")
-        if args.command in ("lock", "apply", "update"):
-            cmd_apply(schema, files, lockdata)
+        cmd_apply(schema, files, lockdata)
 
-    if args.command in ("lock", "update"):
+    if not args.apply_only:
         if changed:
             save_lockfile(args.lockfile, lockdata)
             print(f"\nLock file written: {args.lockfile}")
