@@ -51,8 +51,11 @@ class TestScan(SchemaTestCase, unittest.TestCase):
     def test_image_without_tag_not_matched(self):
         self.assertEqual(self.schema.scan("    image: postgres\n"), [])
 
-    def test_already_locked_not_matched(self):
-        self.assertEqual(self.schema.scan(f"    image: postgres@{_DIGEST} # 16\n"), [])
+    def test_scan_locked_format(self):
+        refs = self.schema.scan(f"    image: postgres@{_DIGEST} # 16\n")
+        self.assertEqual(len(refs), 1)
+        self.assertEqual(refs[0]["image"], "postgres")
+        self.assertEqual(refs[0]["ref"], "16")
 
     def test_namespaced_image(self):
         refs = self.schema.scan("    image: bitnami/postgresql:16\n")
@@ -86,12 +89,19 @@ class TestApply(SchemaTestCase, unittest.TestCase):
         self.assertIn("# 16", result)
         self.assertIn("# 7-alpine", result)
 
-    def test_does_not_double_lock(self):
+    def test_locked_line_without_entry_unchanged(self):
+        # Already-applied line whose original tag is absent from locks — preserve as-is.
         line = f"    image: postgres@{_DIGEST} # 16\n"
-        alt = "sha256:" + "b" * 64
-        result = self.schema.apply(line, {f"postgres@{_DIGEST}": alt})
-        self.assertIn(_DIGEST, result)
-        self.assertNotIn("b" * 64, result)
+        result = self.schema.apply(line, {})
+        self.assertEqual(result.rstrip("\n"), line.rstrip("\n"))
+
+    def test_update_locked_line(self):
+        new_digest = "sha256:" + "b" * 64
+        line = f"    image: postgres@{_DIGEST} # 16\n"
+        result = self.schema.apply(line, {"postgres@16": new_digest})
+        self.assertIn(new_digest, result)
+        self.assertIn("# 16", result)
+        self.assertNotIn("a" * 64, result)
 
     def test_build_only_service_unchanged(self):
         content = textwrap.dedent("""\

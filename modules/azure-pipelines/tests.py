@@ -61,6 +61,17 @@ class TestScan(SchemaTestCase, unittest.TestCase):
         self.assertEqual(len(refs), 1)
         self.assertEqual(refs[0]["ref"], sha)
 
+    def test_scan_extracts_original_ref_from_locked_line(self):
+        sha = "a" * 40
+        content = textwrap.dedent(f"""\
+                - repository: templates
+                  type: github
+                  name: myorg/pipeline-templates
+                  ref: {sha} # refs/tags/v1.2.0
+        """)
+        refs = self.schema.scan(content)
+        self.assertEqual(refs[0]["ref"], "refs/tags/v1.2.0")
+
     def test_task_steps_not_scanned(self):
         content = textwrap.dedent("""\
             steps:
@@ -85,6 +96,7 @@ class TestApply(SchemaTestCase, unittest.TestCase):
         self.assertIn(f"# refs/tags/v1.2.0", result)
 
     def test_does_not_double_lock_sha(self):
+        # SHA with no comment — intentional commit pin, never updated.
         sha = "b" * 40
         content = textwrap.dedent(f"""\
                 - repository: templates
@@ -95,6 +107,19 @@ class TestApply(SchemaTestCase, unittest.TestCase):
         result = self.schema.apply(content, {f"myorg/pipeline-templates@{sha}": "c" * 40})
         self.assertIn(sha, result)
         self.assertNotIn("c" * 40, result)
+
+    def test_update_locked_ref(self):
+        old_sha, new_sha = "a" * 40, "b" * 40
+        content = textwrap.dedent(f"""\
+                - repository: templates
+                  type: github
+                  name: myorg/pipeline-templates
+                  ref: {old_sha} # refs/tags/v1.2.0
+        """)
+        result = self.schema.apply(content, {"myorg/pipeline-templates@refs/tags/v1.2.0": new_sha})
+        self.assertIn(new_sha, result)
+        self.assertIn("# refs/tags/v1.2.0", result)
+        self.assertNotIn(old_sha, result)
 
     def test_multiple_repos_locked(self):
         content = textwrap.dedent("""\

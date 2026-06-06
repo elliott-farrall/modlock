@@ -40,9 +40,16 @@ class TestScan(SchemaTestCase, unittest.TestCase):
     def test_from_scratch_not_matched(self):
         self.assertEqual(self.schema.scan("FROM scratch\n"), [])
 
-    def test_already_locked_not_matched(self):
-        # After apply, lines look like "FROM python@sha256:..." which has no :tag
+    def test_already_locked_without_comment_not_matched(self):
+        # A sha FROM line with no preceding lock comment is not managed by modlock.
         self.assertEqual(self.schema.scan(f"FROM python@{_DIGEST}\n"), [])
+
+    def test_scan_locked_format(self):
+        content = f"# python:3.12-slim\nFROM python@{_DIGEST}\n"
+        refs = self.schema.scan(content)
+        self.assertEqual(len(refs), 1)
+        self.assertEqual(refs[0]["image"], "python")
+        self.assertEqual(refs[0]["ref"], "3.12-slim")
 
     def test_namespaced_image(self):
         refs = self.schema.scan("FROM bitnami/postgresql:16\n")
@@ -67,12 +74,18 @@ class TestApply(SchemaTestCase, unittest.TestCase):
         self.assertIn("AS builder", result)
         self.assertIn("# python:3.12-slim", result)
 
-    def test_does_not_double_lock(self):
+    def test_locked_block_without_entry_unchanged(self):
         content = f"# python:3.12-slim\nFROM python@{_DIGEST}\n"
-        alt_digest = "sha256:" + "b" * 64
-        result = self.schema.apply(content, {f"python@{_DIGEST}": alt_digest})
+        result = self.schema.apply(content, {})
         self.assertIn(_DIGEST, result)
-        self.assertNotIn("b" * 64, result)
+
+    def test_update_already_locked(self):
+        new_digest = "sha256:" + "b" * 64
+        content = f"# python:3.12-slim\nFROM python@{_DIGEST}\n"
+        result = self.schema.apply(content, {"python@3.12-slim": new_digest})
+        self.assertIn(new_digest, result)
+        self.assertIn("# python:3.12-slim", result)
+        self.assertNotIn("a" * 64, result)
 
 
 class TestResolver(unittest.TestCase):

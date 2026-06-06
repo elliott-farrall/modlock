@@ -43,6 +43,11 @@ class TestScan(SchemaTestCase, unittest.TestCase):
         refs = self.schema.scan(f"      - uses: actions/checkout@{sha}\n")
         self.assertEqual(refs[0]["ref"], sha)
 
+    def test_scan_extracts_original_ref_from_locked_line(self):
+        sha = "a" * 40
+        refs = self.schema.scan(f"      - uses: actions/checkout@{sha} # v4\n")
+        self.assertEqual(refs[0]["ref"], "v4")
+
     def test_branch_ref(self):
         refs = self.schema.scan("      - uses: actions/checkout@main\n")
         self.assertEqual(refs[0]["ref"], "main")
@@ -79,11 +84,20 @@ class TestApply(SchemaTestCase, unittest.TestCase):
         self.assertIn("# v4", result)
 
     def test_does_not_double_lock_sha(self):
+        # SHA with no comment — treated as an intentional commit pin, never updated.
         sha = "b" * 40
         content = f"      - uses: actions/checkout@{sha}\n"
         result = self.schema.apply(content, {f"actions/checkout@{sha}": "c" * 40})
         self.assertIn(sha, result)
         self.assertNotIn("c" * 40, result)
+
+    def test_update_locked_line(self):
+        old_sha, new_sha = "a" * 40, "b" * 40
+        content = f"      - uses: actions/checkout@{old_sha} # v4\n"
+        result = self.schema.apply(content, {"actions/checkout@v4": new_sha})
+        self.assertIn(new_sha, result)
+        self.assertIn("# v4", result)
+        self.assertNotIn(old_sha, result)
 
     def test_multiple_locks_applied(self):
         content = textwrap.dedent("""\

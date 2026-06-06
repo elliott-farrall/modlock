@@ -64,6 +64,21 @@ class Schema:
     def lock_key(self, groups: dict) -> str:
         return f"{groups[self.action_field]}@{groups[self.ref_field]}"
 
+    def _canonical_groups(self, groups: dict) -> dict:
+        """
+        If the matched ref is already a SHA and the suffix contains '# original-ref',
+        substitute the original ref so the lock key stays stable across lock/apply cycles.
+        This is what lets modlock lock and modlock update work correctly on already-applied
+        files, and prevents sha-keyed noise entries accumulating in the lock file.
+        """
+        ref = groups.get(self.ref_field, "")
+        suffix = groups.get("suffix", "")
+        if self._sha_pattern.match(ref):
+            m = re.match(r"\s*#\s*(\S+)", suffix)
+            if m:
+                return {**groups, self.ref_field: m.group(1)}
+        return groups
+
     def scan(self, content: str) -> list[dict]:
         """Return one dict per matched reference, including all named groups and line number."""
         if self._custom_scanner:
@@ -72,7 +87,7 @@ class Schema:
         for i, line in enumerate(content.splitlines(), 1):
             m = self._pattern.match(line)
             if m:
-                refs.append({"line": i, **m.groupdict()})
+                refs.append({"line": i, **self._canonical_groups(m.groupdict())})
         return refs
 
     def resolve(self, action: str, ref: str) -> str:
@@ -83,7 +98,8 @@ class Schema:
         """
         Return content with every matched ref replaced by its locked SHA.
         The original ref is preserved as a trailing comment via the output template.
-        Lines whose ref is already a SHA, or whose key is not in locks, are unchanged.
+        Already-applied lines (SHA + comment) are also updated when the lock changes,
+        enabling modlock update to work on files that have already been applied.
         """
         if self._custom_applier:
             return self._custom_applier(content, locks)
@@ -91,7 +107,7 @@ class Schema:
         for line in content.splitlines():
             m = self._pattern.match(line)
             if m:
-                groups = m.groupdict()
+                groups = self._canonical_groups(m.groupdict())
                 ref = groups[self.ref_field]
                 key = self.lock_key(groups)
                 if key in locks and not self._sha_pattern.match(ref):

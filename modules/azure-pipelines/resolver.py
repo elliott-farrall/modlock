@@ -31,11 +31,24 @@ _REF_RE = re.compile(r"^(?P<prefix>[ \t]+ref:[ \t]+)(?P<ref>[^\s#]+)(?P<suffix>.
 # Module-level scan / apply (override core defaults)
 # ---------------------------------------------------------------------------
 
+def _canonical_ref(ref: str, suffix: str) -> str:
+    """
+    If ref is already a SHA and suffix contains '# original-ref', return the
+    original ref so the lock key stays stable across lock/apply cycles.
+    """
+    if _SHA_RE.match(ref):
+        m = re.match(r"\s*#\s*(\S+)", suffix)
+        if m:
+            return m.group(1)
+    return ref
+
+
 def scan(content: str) -> list[dict]:
     """
     Return one entry per repository resource ref found in content.
-    Pairs each ref: line with the name: line that precedes it in the
-    same resource block.
+    Pairs each ref: line with the name: line that precedes it in the same
+    resource block. Already-applied lines (SHA + comment) are detected and
+    their original ref is returned so the lock key stays stable.
     """
     results = []
     pending_name: str | None = None
@@ -52,10 +65,11 @@ def scan(content: str) -> list[dict]:
         if ref_m and pending_name is not None:
             ref_indent = len(ref_m.group("prefix")) - len(ref_m.group("prefix").lstrip())
             if ref_indent == pending_indent:
+                ref = _canonical_ref(ref_m.group("ref"), ref_m.group("suffix"))
                 results.append({
                     "line": i,
                     "action": pending_name,
-                    "ref": ref_m.group("ref"),
+                    "ref": ref,
                     "prefix": ref_m.group("prefix"),
                     "suffix": ref_m.group("suffix"),
                 })
@@ -63,7 +77,6 @@ def scan(content: str) -> list[dict]:
                 pending_indent = None
                 continue
 
-        # A new repository block resets state
         if line.strip().startswith("- repository:"):
             pending_name = None
             pending_indent = None
@@ -73,9 +86,9 @@ def scan(content: str) -> list[dict]:
 
 def apply(content: str, locks: dict[str, str]) -> str:
     """
-    Rewrite ref: lines whose paired name: has an entry in locks,
-    replacing the ref with the locked SHA and preserving the original
-    ref as a comment.
+    Rewrite ref: lines whose paired name: has an entry in locks.
+    Already-applied lines (SHA + comment) are also updated when the lock
+    changes, enabling modlock update to work on already-applied files.
     """
     out_lines = []
     pending_name: str | None = None
@@ -93,7 +106,7 @@ def apply(content: str, locks: dict[str, str]) -> str:
         if ref_m and pending_name is not None:
             ref_indent = len(ref_m.group("prefix")) - len(ref_m.group("prefix").lstrip())
             if ref_indent == pending_indent:
-                ref = ref_m.group("ref")
+                ref = _canonical_ref(ref_m.group("ref"), ref_m.group("suffix"))
                 key = f"{pending_name}@{ref}"
                 if key in locks and not _SHA_RE.match(ref):
                     sha = locks[key]
