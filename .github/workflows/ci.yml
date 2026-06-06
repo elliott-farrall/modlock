@@ -13,7 +13,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install
-        run: pip install -e .
+        run: pip install -e ".[test]"
       - name: Run tests
         run: pytest -v
 
@@ -25,7 +25,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install
-        run: pip install -e .
+        run: pip install -e ".[test]"
       - name: Lock example workflows
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
