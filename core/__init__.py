@@ -2,9 +2,9 @@
 modlock — modular version locking for plain-text config files.
 
 Config-file mode (reads modlock.toml/yaml/json, no file arguments needed):
-  modlock lock
-  modlock apply
-  modlock update
+  modlock lock    Resolve refs, write lock file, and apply to files.
+  modlock apply   Apply an existing lock file without re-resolving.
+  modlock update  Re-resolve all refs, update lock file, and apply.
 
 Explicit mode (single module, files supplied on the command line):
   modlock lock   --schema SCHEMA FILE [FILE ...]
@@ -344,7 +344,7 @@ def main() -> None:
         print(f"\n[{schema.name}]")
         if args.command in ("lock", "update"):
             changed |= cmd_lock(schema, files, lockdata, force=args.command == "update")
-        if args.command in ("apply", "update"):
+        if args.command in ("lock", "apply", "update"):
             cmd_apply(schema, files, lockdata)
 
     if args.command in ("lock", "update"):

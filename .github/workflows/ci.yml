@@ -26,12 +26,10 @@ jobs:
           python-version: "3.12"
       - name: Install
         run: pip install -e ".[test]"
-      - name: Lock example files
+      - name: Lock and apply
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: modlock lock
-      - name: Apply locks
-        run: modlock apply
       - name: Upload lock artifacts
         uses: actions/upload-artifact@v4
         with:
