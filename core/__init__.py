@@ -316,7 +316,8 @@ def main() -> None:
             except FileNotFoundError as e:
                 print(str(e), file=sys.stderr)
                 sys.exit(1)
-            files = expand_files(module_cfg.get("files", []))
+            patterns = module_cfg.get("files") or schema.file_patterns
+            files = expand_files(patterns)
             if files:
                 jobs.append((schema, files))
 
