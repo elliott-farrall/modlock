@@ -1,0 +1,12 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: myapp
+  cache:
+    image: redis:7-alpine
+  app:
+    build: .
+    depends_on:
+      - db
+      - cache

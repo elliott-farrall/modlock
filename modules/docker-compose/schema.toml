@@ -1,0 +1,22 @@
+name = "docker-compose"
+file_patterns = [
+  "**/docker-compose.yml",
+  "**/docker-compose.yaml",
+  "**/docker-compose.*.yml",
+  "**/compose.yml",
+  "**/compose.yaml",
+]
+
+[scanner]
+# Matches indented `image: owner/repo:tag` lines inside service blocks.
+# Named groups: prefix, image, ref, suffix
+pattern = '^(?P<prefix>[ \t]+image:[ \t]+)(?P<image>[a-zA-Z0-9._/-]+):(?P<ref>[a-zA-Z0-9._-]+)(?P<suffix>.*)$'
+sha_pattern = '^sha256:[0-9a-f]{64}$'
+
+[output]
+# YAML supports inline comments, so the original tag is kept as a comment.
+template = "{prefix}{image}@{sha} # {ref}"
+
+[resolver]
+action_field = "image"
+ref_field = "ref"

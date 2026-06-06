@@ -7,3 +7,13 @@ files = [
 files = [
   "modules/azure-pipelines/examples/*.yml",
 ]
+
+[modules.dockerfile]
+files = [
+  "modules/dockerfile/examples/Dockerfile*",
+]
+
+[modules.docker-compose]
+files = [
+  "modules/docker-compose/examples/*.yml",
+]

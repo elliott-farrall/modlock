@@ -1,0 +1,21 @@
+name = "dockerfile"
+file_patterns = [
+  "**/Dockerfile",
+  "**/Dockerfile.*",
+  "**/*.dockerfile",
+]
+
+[scanner]
+# FROM image:tag — scanning and applying are handled by module-level functions
+# in resolver.py because Dockerfile does not support mid-line comments, so the
+# locked SHA is written on its own line with the original tag as a comment above.
+pattern = '^(?P<prefix>FROM\s+)(?P<image>[a-zA-Z0-9._/-]+):(?P<ref>[a-zA-Z0-9._-]+)(?P<suffix>.*)$'
+sha_pattern = '^sha256:[0-9a-f]{64}$'
+
+[output]
+# Unused — apply() is implemented in resolver.py.
+template = "{prefix}{image}@{sha} # {ref}"
+
+[resolver]
+action_field = "image"
+ref_field = "ref"
