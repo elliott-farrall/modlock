@@ -15,7 +15,7 @@ jobs:
       - name: Install
         run: pip install -e ".[test]"
       - name: Run tests
-        run: pytest -v
+        run: python -m pytest -v
 
   lock-check:
     runs-on: ubuntu-latest

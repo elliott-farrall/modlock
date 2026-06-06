@@ -1,7 +1,7 @@
 """
 modlock — modular version locking for plain-text config files.
 
-Config-file mode (reads modlock.toml, no file arguments needed):
+Config-file mode (reads modlock.toml/yaml/json, no file arguments needed):
   modlock lock
   modlock apply
   modlock update
@@ -15,7 +15,7 @@ Options:
   --schema   Module name (explicit mode only).
   --token    API token for the resolver (falls back to env var).
   --lockfile Path to the lock file (default: modlock.lock).
-  --config   Path to the project config (default: modlock.toml).
+  --config   Path to the project config (auto-discovered if omitted).
 """
 
 import argparse
@@ -28,8 +28,10 @@ import sys
 import tomllib
 from pathlib import Path
 
+import yaml
+
 LOCKFILE_DEFAULT = "modlock.lock"
-CONFIG_DEFAULT = "modlock.toml"
+CONFIG_NAMES = ["modlock.toml", "modlock.yaml", "modlock.yml", "modlock.json"]
 MODULES_DIR = Path(__file__).parent.parent / "modules"
 
 
@@ -134,19 +136,34 @@ def load_schema(name: str, token: str | None = None) -> Schema:
 # Project config
 # ---------------------------------------------------------------------------
 
+def _find_config() -> str | None:
+    """Return the first config file found in the current directory, or None."""
+    for name in CONFIG_NAMES:
+        if os.path.exists(name):
+            return name
+    return None
+
+
 def load_config(path: str) -> dict[str, dict]:
     """
-    Load a modlock.toml project config file.
+    Load a modlock config file (TOML, YAML, or JSON).
     Returns {module_name: {"files": [...], ...}}.
     """
-    if not os.path.exists(path):
-        raise FileNotFoundError(
-            f"Config file '{path}' not found.\n"
-            f"Create one or supply --schema and FILE arguments to use explicit mode."
+    ext = Path(path).suffix.lower()
+    if ext == ".toml":
+        with open(path, "rb") as f:
+            data = tomllib.load(f)
+    elif ext in (".yaml", ".yml"):
+        with open(path) as f:
+            data = yaml.safe_load(f)
+    elif ext == ".json":
+        with open(path) as f:
+            data = json.load(f)
+    else:
+        raise ValueError(
+            f"Unsupported config format '{ext}'. Use .toml, .yaml, .yml, or .json."
         )
-    with open(path, "rb") as f:
-        config = tomllib.load(f)
-    return config.get("modules", {})
+    return data.get("modules", {})
 
 
 # ---------------------------------------------------------------------------
@@ -255,8 +272,10 @@ def main() -> None:
     parser.add_argument("--schema", help="Module to use (required in explicit mode).")
     parser.add_argument("--token", help="API token for the resolver.")
     parser.add_argument("--lockfile", default=LOCKFILE_DEFAULT)
-    parser.add_argument("--config", default=CONFIG_DEFAULT,
-                        help=f"Project config file (default: {CONFIG_DEFAULT}).")
+    parser.add_argument(
+        "--config", default=None,
+        help=f"Project config file. Auto-discovered if omitted (tries {', '.join(CONFIG_NAMES)}).",
+    )
 
     args = parser.parse_args()
 
@@ -276,10 +295,18 @@ def main() -> None:
             sys.exit(1)
         jobs = [(schema, files)]
     else:
-        # Config mode — reads modlock.toml
+        # Config mode — auto-discover or use --config path
+        config_path = args.config or _find_config()
+        if config_path is None:
+            print(
+                f"No config file found. Tried: {', '.join(CONFIG_NAMES)}\n"
+                f"Create one or use --schema and FILE arguments for explicit mode.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
         try:
-            config = load_config(args.config)
-        except FileNotFoundError as e:
+            config = load_config(config_path)
+        except (FileNotFoundError, ValueError) as e:
             print(str(e), file=sys.stderr)
             sys.exit(1)
         jobs = []

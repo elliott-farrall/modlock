@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "modlock"
 version = "0.1.0"
 requires-python = ">=3.11"
+dependencies = ["pyyaml"]
 
 [project.optional-dependencies]
 test = ["pytest"]
